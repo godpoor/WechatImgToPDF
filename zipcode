@@ -1,0 +1,7 @@
+
+
+
+打包命令如下：
+pyinstaller -F -i 1.ico -w mian.py
+
+打包python 程序 成windows 软件：
