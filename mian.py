@@ -2,7 +2,7 @@ import sys
 import os
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QPushButton, QFileDialog,
-    QHBoxLayout, QVBoxLayout
+    QHBoxLayout, QVBoxLayout, QInputDialog,QMessageBox
 )
 from PyQt6.QtGui import QClipboard
 from PyQt6.QtCore import Qt
@@ -19,8 +19,6 @@ class ImageProcessor(QWidget):
 
     def initUI(self):
         self.setWindowTitle('转换器')
-
-       
         self.setFixedSize(400, 200)
 
         # --- 布局部分 ---
@@ -46,21 +44,15 @@ class ImageProcessor(QWidget):
         self.show()
 
     def center_window(self):
-        # 获取屏幕尺寸并计算居中位置
         screen = QApplication.primaryScreen()
         screen_geometry = screen.geometry()
         window_geometry = self.frameGeometry()
         center_point = screen_geometry.center()
-
-        # 将窗口的中心点移至屏幕中心
         window_geometry.moveCenter(center_point)
         self.move(window_geometry.topLeft())
 
     def process_clipboard(self):
-        """
-        从剪切板获取URL并抓取网页上的所有 img 标签，按序号保存为图片文件。
-        支持 jpg、png、webp、gif 等格式。
-        """
+
         clipboard = QApplication.clipboard()
         url = clipboard.text().strip()
 
@@ -68,48 +60,34 @@ class ImageProcessor(QWidget):
             print('剪贴板为空或者不包含URL。')
             return
 
+        # 在程序当前路径下创建名为“转换图像”的文件夹
+        folder = os.path.join(os.getcwd(), "转换图像")
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+
         try:
             response = requests.get(url)
             response.raise_for_status()
 
             soup = BeautifulSoup(response.text, 'html.parser')
             img_tags = soup.find_all('img')
-
-            if not img_tags:
-                print('网页中未找到任何图片。')
-                return
-
-            save_folder = QFileDialog.getExistingDirectory(self, '选择保存图片的文件夹')
-            if not save_folder:
-                return
-
-            count = 0
-            for idx, img in enumerate(img_tags, start=1):
-                img_url = img.get('src')
-                if not img_url:
-                    continue
-
-                # 根据实际情况，补齐协议或相对路径
-                if img_url.startswith('//'):
-                    img_url = 'http:' + img_url
-                elif img_url.startswith('/') or not img_url.startswith('http'):
-                    img_url = os.path.join(url, img_url)
-
-                # 获取图片后缀，若无则默认jpg
-                ext = os.path.splitext(img_url)[-1].lower()
-                if ext not in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
-                    ext = '.jpg'
-
-                try:
-                    img_data = requests.get(img_url).content
-                    img_path = os.path.join(save_folder, f'{idx}{ext}')
-                    with open(img_path, 'wb') as f:
-                        f.write(img_data)
-                    count += 1
-                except Exception as e:
-                    print(f'下载图片失败: {e}')
-
-            print(f'已下载 {count} 张图片到文件夹: {save_folder}')
+            for index, img in enumerate(img_tags, start=1):
+                img_url = img.get('data-src') or img.get('src')
+                if img_url:
+                    try:
+                        filename = os.path.join(folder, f'{index}.jpg')
+                        img_data = requests.get(img_url).content
+                        with open(filename, 'wb') as f:
+                            f.write(img_data)
+                        print(f"成功下载: {filename}")
+                    except Exception as e:
+                        print(f"无法下载图片 {img_url}: {e}")
+             # 弹出提示框，通知图片下载完成
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Icon.Information)  # 修改这里
+            msg.setText("所有图片下载完成！")
+            msg.setWindowTitle("下载完成")
+            msg.exec()
 
         except requests.RequestException as e:
             print(f'网络请求错误: {e}')
@@ -117,46 +95,38 @@ class ImageProcessor(QWidget):
             print(f'发生错误: {e}')
 
     def convert_images_to_pdf(self):
-        """
-        选择包含图片的文件夹，将其中的所有常见图片文件（jpg/jpeg/png/webp/gif）
-        按照数字序号排序后合并成一个 PDF（使用 img2pdf）。
-        """
         folder = QFileDialog.getExistingDirectory(self, '选择包含图片的文件夹')
         if not folder:
             return
 
-        # 获取文件夹下所有可能的图片文件
         valid_exts = ('.jpg', '.jpeg', '.png', '.gif', '.webp')
         images = [
             f for f in os.listdir(folder)
             if f.lower().endswith(valid_exts)
         ]
 
-        # 按照文件名前的数字进行排序
         def sort_key(x):
-            # 去掉后缀，转化为 int 用于排序
             name_without_ext, _ = os.path.splitext(x)
             try:
                 return int(name_without_ext)
             except ValueError:
-                # 如果转换失败，则返回原始字符串保证不报错
                 return name_without_ext
 
         images.sort(key=sort_key)
 
-        # 如果没有图片，直接返回
         if not images:
             print('该文件夹下没有可转换的图片。')
             return
 
-        output_pdf = os.path.join(folder, 'output.pdf')
+        pdf_path, _ = QFileDialog.getSaveFileName(self, '保存PDF文件', os.path.join(folder, '转换图像.pdf'), "PDF Files (*.pdf)")
+        if not pdf_path:
+            return
 
-        # 使用 img2pdf 将多张图片合并为一个 PDF
         img_paths = [os.path.join(folder, img) for img in images]
         try:
-            with open(output_pdf, 'wb') as f:
+            with open(pdf_path, 'wb') as f:
                 f.write(img2pdf.convert(img_paths))
-            print(f'PDF 文件已保存为: {output_pdf}')
+            print(f'PDF 文件已保存为: {pdf_path}')
         except Exception as e:
             print(f'合并图片时出错: {e}')
 
