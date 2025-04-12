@@ -4,9 +4,7 @@ from PyQt6.QtWidgets import (
     QApplication, QWidget, QPushButton, QFileDialog,
     QHBoxLayout, QVBoxLayout, QInputDialog,QMessageBox
 )
-from PyQt6.QtGui import QClipboard
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QScreen
+
 from bs4 import BeautifulSoup
 import requests
 import img2pdf  # 用于把多张图片合并为 PDF
@@ -52,7 +50,6 @@ class ImageProcessor(QWidget):
         self.move(window_geometry.topLeft())
 
     def process_clipboard(self):
-
         clipboard = QApplication.clipboard()
         url = clipboard.text().strip()
 
@@ -60,31 +57,44 @@ class ImageProcessor(QWidget):
             print('剪贴板为空或者不包含URL。')
             return
 
-        # 在程序当前路径下创建名为“转换图像”的文件夹
-        folder = os.path.join(os.getcwd(), "转换图像")
-        if not os.path.exists(folder):
-            os.makedirs(folder)
-
         try:
-            response = requests.get(url)
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36'
+            }
+            response = requests.get(url, headers=headers)
             response.raise_for_status()
 
             soup = BeautifulSoup(response.text, 'html.parser')
+
+            # # 获取文章标题作为子目录名
+            # title_tag = soup.find('h1')
+            # title = title_tag.get_text(strip=True) if title_tag else 'wechat_article'
+            # title = ''.join(c for c in title if c.isalnum() or c in (' ', '-', '_')).rstrip()
+
+            # 创建文件夹（转换图像/标题_时间）
+            from datetime import datetime
+            folder = os.path.join(os.getcwd(), "转换图像")
+            # folder_name = f"{title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            # folder = os.path.join(folder_root, folder_name)
+            os.makedirs(folder, exist_ok=True)
+
             img_tags = soup.find_all('img')
             for index, img in enumerate(img_tags, start=1):
                 img_url = img.get('data-src') or img.get('src')
                 if img_url:
                     try:
-                        filename = os.path.join(folder, f'{index}.jpg')
-                        img_data = requests.get(img_url).content
+                        # 根据链接尾部格式生成扩展名
+                        img_format = img_url.split('=')[-1].split('&')[0]
+                        filename = os.path.join(folder, f'{index}.{img_format}')
+                        img_data = requests.get(img_url, headers=headers).content
                         with open(filename, 'wb') as f:
                             f.write(img_data)
                         print(f"成功下载: {filename}")
                     except Exception as e:
                         print(f"无法下载图片 {img_url}: {e}")
-             # 弹出提示框，通知图片下载完成
+
             msg = QMessageBox()
-            msg.setIcon(QMessageBox.Icon.Information)  # 修改这里
+            msg.setIcon(QMessageBox.Icon.Information)
             msg.setText("所有图片下载完成！")
             msg.setWindowTitle("下载完成")
             msg.exec()
