@@ -5,7 +5,7 @@ a = Analysis(
     ['mian.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('1.ico', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -35,5 +35,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['2.ico'],
+    icon=['3.ico'],
 )

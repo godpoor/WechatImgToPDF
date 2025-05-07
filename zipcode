@@ -1,7 +1,12 @@
 
+跳转路径：
+cd D:\Codes\WechatImgToPDF
 
+激活环境：
+conda activate Dioptas
 
 打包命令如下：
 pyinstaller -F -i 1.ico -w mian.py
+pyinstaller -F -w -i 3.ico --add-data "1.ico;." mian.py
 
 打包python 程序 成windows 软件：

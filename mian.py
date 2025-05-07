@@ -1,13 +1,61 @@
 import sys
 import os
+import time
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QPushButton, QFileDialog,
-    QHBoxLayout, QVBoxLayout, QInputDialog,QMessageBox
+    QHBoxLayout, QVBoxLayout, QInputDialog, QMessageBox
 )
-
+from PyQt6.QtGui import QIcon
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from bs4 import BeautifulSoup
 import requests
-import img2pdf  # 用于把多张图片合并为 PDF
+import img2pdf
+from urllib.parse import urlparse, parse_qs, urlunparse
+
+
+class DownloadThread(QThread):
+    finished = pyqtSignal(str)  # 下载完成信号，参数为文件夹路径
+    error = pyqtSignal(str)     # 错误信号
+
+    def __init__(self, url, folder):
+        super().__init__()
+        self.url = url
+        self.folder = folder
+
+    def run(self):
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36'
+            }
+            response = requests.get(self.url, headers=headers)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, 'html.parser')
+            img_tags = soup.find_all('img')
+
+            for index, img in enumerate(img_tags, start=1):
+                img_url = img.get('data-src') or img.get('src')
+                if img_url:
+                    try:
+                        img_url = self.clean_img_url(img_url)
+                        img_format = img_url.split('=')[-1].split('&')[0]
+                        filename = os.path.join(self.folder, f'{index}.{img_format}')
+                        img_data = requests.get(img_url, headers=headers).content
+                        with open(filename, 'wb') as f:
+                            f.write(img_data)
+                        print(f"成功下载: {filename}")
+                        time.sleep(0.5)
+                    except Exception as e:
+                        print(f"无法下载图片 {img_url}: {e}")
+            self.finished.emit(self.folder)
+        except Exception as e:
+            self.error.emit(str(e))
+
+    def clean_img_url(self, url):
+        parsed = urlparse(url)
+        query = parse_qs(parsed.query)
+        allowed = {k: v for k, v in query.items() if k in ('wx_fmt',)}
+        new_query = '&'.join(f"{k}={v[0]}" for k, v in allowed.items())
+        return urlunparse(parsed._replace(query=new_query))
 
 
 class ImageProcessor(QWidget):
@@ -16,10 +64,16 @@ class ImageProcessor(QWidget):
         self.initUI()
 
     def initUI(self):
+
         self.setWindowTitle('转换器')
         self.setFixedSize(400, 200)
+        self.setWindowIcon(QIcon("1.ico"))  # 设置窗口图标
 
-        # --- 布局部分 ---
+        self.setWindowTitle('转换器')
+        self.setFixedSize(400, 200)
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
+
+
         button_layout = QHBoxLayout()
         button_layout.setSpacing(40)
 
@@ -35,10 +89,10 @@ class ImageProcessor(QWidget):
         main_layout.addLayout(button_layout)
         self.setLayout(main_layout)
 
-        # --- 将窗口移动到屏幕中心 ---
         self.center_window()
+        self.show()
 
-        # 显示窗口
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, False)
         self.show()
 
     def center_window(self):
@@ -52,57 +106,39 @@ class ImageProcessor(QWidget):
     def process_clipboard(self):
         clipboard = QApplication.clipboard()
         url = clipboard.text().strip()
-
         if not url:
-            print('剪贴板为空或者不包含URL。')
+            print("剪贴板为空或不包含URL")
             return
 
-        try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36'
-            }
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
+        folder = os.path.join(os.getcwd(), "转换图像")
+        os.makedirs(folder, exist_ok=True)
 
-            soup = BeautifulSoup(response.text, 'html.parser')
+        self.thread = DownloadThread(url, folder)
+        self.thread.finished.connect(self.on_download_finished)
+        self.thread.error.connect(self.on_download_error)
+        self.clipboard_button.setEnabled(False)
+        self.clipboard_button.setText("下载中...")
+        self.thread.start()
 
-            # # 获取文章标题作为子目录名
-            # title_tag = soup.find('h1')
-            # title = title_tag.get_text(strip=True) if title_tag else 'wechat_article'
-            # title = ''.join(c for c in title if c.isalnum() or c in (' ', '-', '_')).rstrip()
+    def on_download_finished(self, folder):
+        self.clipboard_button.setEnabled(True)
+        self.clipboard_button.setText("保存图片")
+        msg = QMessageBox(self)
+        msg.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setText(f"所有图片下载完成！\n保存路径：{folder}")
+        msg.setWindowTitle("下载完成")
+        msg.exec()
 
-            # 创建文件夹（转换图像/标题_时间）
-            from datetime import datetime
-            folder = os.path.join(os.getcwd(), "转换图像")
-            # folder_name = f"{title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            # folder = os.path.join(folder_root, folder_name)
-            os.makedirs(folder, exist_ok=True)
-
-            img_tags = soup.find_all('img')
-            for index, img in enumerate(img_tags, start=1):
-                img_url = img.get('data-src') or img.get('src')
-                if img_url:
-                    try:
-                        # 根据链接尾部格式生成扩展名
-                        img_format = img_url.split('=')[-1].split('&')[0]
-                        filename = os.path.join(folder, f'{index}.{img_format}')
-                        img_data = requests.get(img_url, headers=headers).content
-                        with open(filename, 'wb') as f:
-                            f.write(img_data)
-                        print(f"成功下载: {filename}")
-                    except Exception as e:
-                        print(f"无法下载图片 {img_url}: {e}")
-
-            msg = QMessageBox()
-            msg.setIcon(QMessageBox.Icon.Information)
-            msg.setText("所有图片下载完成！")
-            msg.setWindowTitle("下载完成")
-            msg.exec()
-
-        except requests.RequestException as e:
-            print(f'网络请求错误: {e}')
-        except Exception as e:
-            print(f'发生错误: {e}')
+    def on_download_error(self, error_msg):
+        self.clipboard_button.setEnabled(True)
+        self.clipboard_button.setText("保存图片")
+        msg = QMessageBox(self)
+        msg.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
+        msg.setIcon(QMessageBox.Icon.Critical)
+        msg.setText(f"下载出错：\n{error_msg}")
+        msg.setWindowTitle("错误")
+        msg.exec()
 
     def convert_images_to_pdf(self):
         folder = QFileDialog.getExistingDirectory(self, '选择包含图片的文件夹')
